@@ -511,6 +511,43 @@ class TestPandasContainer(object):
                            by_blocks=True,
                            check_exact=True)
 
+    def test_frame_nonprintable_bytes(self):
+        # GH14256: failing column caused segfaults, if it is not the last one
+
+        class BinaryThing(object):
+
+            def __init__(self, hexed):
+                self.hexed = hexed
+                if compat.PY2:
+                    self.binary = hexed.decode('hex')
+                else:
+                    self.binary = bytes.fromhex(hexed)
+
+            def __str__(self):
+                return self.hexed
+
+        hexed = '574b4454ba8c5eb4f98a8f45'
+        exc_type = OverflowError
+        binthing = BinaryThing(hexed)
+        df_printable = DataFrame({'A': [binthing.hexed]})
+        assert df_printable.to_json() == '{"A":{"0":"%s"}}' % hexed
+        df_nonprintable = DataFrame({'A': [binthing]})
+        pytest.raises(exc_type, df_nonprintable.to_json)
+        df_mixed = DataFrame({'A': [binthing], 'B': [1]},
+                             columns=['A', 'B'])
+        pytest.raises(exc_type, df_mixed.to_json)
+        # default_handler should resolve exceptions for non-string types
+        assert df_nonprintable.to_json(default_handler=str) == \
+            '{"A":{"0":"%s"}}' % hexed
+        assert df_mixed.to_json(default_handler=str) == \
+            '{"A":{"0":"%s"},"B":{"0":1}}' % hexed
+
+    def test_label_overflow(self):
+        # GH14256: buffer length not checked when writing label
+        df = pd.DataFrame({'foo': [1337], 'bar' * 100000: [1]})
+        assert df.to_json() == \
+            '{"%s":{"0":1},"foo":{"0":1337}}' % ('bar' * 100000)
+
     def test_series_non_unique_index(self):
         s = Series(['a', 'b'], index=[1, 1])
 
